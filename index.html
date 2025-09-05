@@ -5,68 +5,163 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Class Length Tracker</title>
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 12px; }
-      form, .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
-      label { display: block; margin: 8px 0 4px; }
-      input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 8px; }
+      :root { --gap: 12px; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 840px; margin: 24px auto; padding: 0 12px; }
+      h1 { margin: 0 0 8px; }
+      .sub { color: #555; margin-bottom: 16px; }
+      .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
+      form label { display: block; margin: 8px 0 4px; }
+      input, button, select { font: inherit; }
+      input[type="number"], input[type="time"] { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 8px; }
       button { padding: 10px 14px; border: 0; border-radius: 10px; cursor: pointer; }
+      .row { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--gap); }
+      .row-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); }
+      .row-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap); }
+      .actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+      #status { font-size: 0.95em; color: #444; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+      th { background: #fafafa; }
+      .muted { color: #777; }
+      .inline { display: inline-flex; align-items: center; gap: 8px; }
+      .pill { padding: 4px 8px; border: 1px solid #ddd; border-radius: 999px; font-size: 0.9em; }
+      .right { text-align: right; }
+      .hint { font-size: 0.9em; color: #666; }
+      .danger { color: #b00020; }
+      .success { color: #0a6; }
+      @media (max-width: 640px) {
+        .row, .row-3, .row-4 { grid-template-columns: 1fr; }
+      }
     </style>
   </head>
   <body>
     <h1>Class Length Tracker</h1>
-
-    <form id="entryForm">
-      <label>PowerPoint # <input type="number" name="ppt_number" required></label>
-      <label>Slides <input type="number" name="slides" required></label>
-      <label>Start time (EST) <input type="datetime-local" name="start_time" required></label>
-      <label>End time (EST) <input type="datetime-local" name="end_time" required></label>
-      <button type="submit">Add</button>
-      <span id="status"></span>
-    </form>
+    <div class="sub">Add a deck entry and see the live ETA for the lecture.</div>
 
     <div class="card">
-      <h2>Live Estimate</h2>
-      <div id="estimate">Loading…</div>
+      <form id="entryForm" autocomplete="off">
+        <div class="row-4">
+          <label>PowerPoint #
+            <input type="number" name="ppt_number" min="0" required>
+          </label>
+          <label>Slides
+            <input type="number" name="slides" min="0" required>
+          </label>
+          <label>Start time (HH:MM)
+            <input type="time" name="start_time" required>
+          </label>
+          <label>End time (HH:MM)
+            <input type="time" name="end_time" required>
+          </label>
+        </div>
+
+        <!-- Stored for context on the sheet -->
+        <input type="hidden" name="date_local" id="date_local">
+
+        <div class="actions">
+          <button type="submit">Add</button>
+          <span id="status" class="muted"></span>
+        </div>
+      </form>
+      <div class="hint">Times are interpreted for America/New_York.</div>
     </div>
 
     <div class="card">
-      <h2>Recent Entries</h2>
-      <table id="table" border="0" cellpadding="6"></table>
+      <h2>Live estimate</h2>
+      <div class="row">
+        <div>
+          <div class="inline">
+            <span class="pill">Average rate</span>
+            <span id="avgRate" class="muted">—</span>
+          </div>
+          <div class="inline" style="margin-left:12px">
+            <span class="pill">Total slides entered</span>
+            <span id="totalSlides" class="muted">—</span>
+          </div>
+        </div>
+        <div class="right">
+          <div class="inline">
+            <label>Remaining slides
+              <input id="remainingSlides" type="number" min="0" value="30" style="width:120px; margin-left:8px;">
+            </label>
+            <button id="calcBtn" type="button" title="Calculate ETA">Calculate</button>
+          </div>
+        </div>
+      </div>
+      <div id="eta" style="margin-top:10px" class="muted">Enter some entries to compute the rate.</div>
+    </div>
+
+    <div class="card">
+      <h2>Recent entries</h2>
+      <table id="table"></table>
+      <div class="hint" id="updatedAt"></div>
     </div>
 
     <script>
-      // ===== configure this =====
-      const API = 'https://script.google.com/macros/s/AKfycbzvC2QkZ6CT-vSVpIMp0GfN3JSLC4PwdWZj-DIn6aZlZOAK-7sPuBZGMwWLzW12mSfb/exec';
+      // ===== CONFIGURE THIS =====
+      // Paste your Apps Script Web App URL (must end with /exec)
+      const API = 'https://script.google.com/macros/s/AKfycbytlax3H4dtBA5WAyOU5uK86DrewPP2MkJFmwDG5ekgAMiUEc_2q9kjo0MRQE8ub7EG/exec';
 
-      // current time in EST
-      function nowInEST() {
-        // America/New_York handles EST/EDT automatically
+      // === Time helpers ===
+
+      // New York "now" object
+      function nowInNY() {
         return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
       }
 
-      // minutes between two local datetime strings
-      function minutesBetween(startLocal, endLocal) {
-        const s = new Date(startLocal);
-        const e = new Date(endLocal);
-        return (e - s) / 60000;
+      // Build a Date in New York for today at "HH:MM"
+      function nyDateAt(timeHHMM) {
+        const nyNow = nowInNY();
+        const [hh, mm] = String(timeHHMM).split(':').map(Number);
+        // construct local components, then let toLocaleString in NY give us the correct epoch
+        const y = nyNow.getFullYear();
+        const m = nyNow.getMonth() + 1;
+        const d = nyNow.getDate();
+
+        // Use a plain date-time string, then interpret in NY by re-parsing through NY locale
+        const nyMillis = new Date(
+          new Date(`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')} ${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00`)
+            .toLocaleString('en-US', { timeZone: 'America/New_York' })
+        ).getTime();
+
+        return new Date(nyMillis);
       }
+
+      function minutesBetweenTimes(startHHMM, endHHMM) {
+        const s = nyDateAt(startHHMM);
+        const e = nyDateAt(endHHMM);
+        let diff = (e - s) / 60000;
+        if (diff < 0) diff += 24 * 60; // pass midnight
+        return diff;
+      }
+
+      function setNYDateHidden() {
+        const ny = nowInNY();
+        const y = ny.getFullYear();
+        const m = String(ny.getMonth() + 1).padStart(2, '0');
+        const d = String(ny.getDate()).padStart(2, '0');
+        document.getElementById('date_local').value = `${y}-${m}-${d}`;
+      }
+      setNYDateHidden();
+      setInterval(setNYDateHidden, 60_000);
+
+      // === Data IO ===
 
       async function fetchData() {
         const res = await fetch(API);
-        const json = await res.json();
+        const json = await res.json().catch(() => ({}));
         return json.data || [];
       }
 
       function computeStats(rows) {
-        // rows: [{ppt_number, slides, start_time, end_time}, ...]
-        // compute per-slide rate (minutes per slide) using entries with valid times & slides > 0
         const rates = [];
         let totalSlides = 0;
 
         rows.forEach(r => {
           const slides = Number(r.slides);
-          if (!slides || !r.start_time || !r.end_time) return;
-          const mins = minutesBetween(r.start_time, r.end_time);
+          const st = r.start_time, et = r.end_time;
+          if (!slides || !st || !et) return;
+          const mins = minutesBetweenTimes(st, et);
           if (mins > 0 && slides > 0) {
             rates.push(mins / slides);
             totalSlides += slides;
@@ -74,7 +169,7 @@
         });
 
         const avgRateMinPerSlide = rates.length
-          ? rates.reduce((a,b)=>a+b,0) / rates.length
+          ? rates.reduce((a, b) => a + b, 0) / rates.length
           : null;
 
         return { avgRateMinPerSlide, totalSlides };
@@ -83,96 +178,98 @@
       function renderTable(rows) {
         const table = document.getElementById('table');
         table.innerHTML = '';
-        if (!rows.length) { table.innerHTML = '<i>No data yet</i>'; return; }
+        if (!rows.length) {
+          table.innerHTML = '<tr><td class="muted">No data yet</td></tr>';
+          return;
+        }
 
         const header = document.createElement('tr');
-        ['ppt_number','slides','start_time','end_time'].forEach(h => {
+        ['date_local','ppt_number','slides','start_time','end_time','timestamp'].forEach(h => {
           const th = document.createElement('th'); th.textContent = h; header.appendChild(th);
         });
         table.appendChild(header);
 
-        rows.slice(-10).forEach(r => {
+        rows.slice(-12).forEach(r => {
           const tr = document.createElement('tr');
-          ['ppt_number','slides','start_time','end_time'].forEach(k => {
+          ['date_local','ppt_number','slides','start_time','end_time','timestamp'].forEach(k => {
             const td = document.createElement('td'); td.textContent = r[k] ?? ''; tr.appendChild(td);
           });
           table.appendChild(tr);
         });
+
+        document.getElementById('updatedAt').textContent =
+          `Updated ${nowInNY().toLocaleString('en-US', { timeZone: 'America/New_York' })} (America/New_York)`;
       }
 
-      function renderEstimate(rows) {
-        const est = document.getElementById('estimate');
+      function renderStats(rows) {
         const { avgRateMinPerSlide, totalSlides } = computeStats(rows);
-        if (!avgRateMinPerSlide) {
-          est.innerHTML = 'Insufficient data to estimate yet.';
+        const avgRateEl = document.getElementById('avgRate');
+        const totalSlidesEl = document.getElementById('totalSlides');
+        const etaEl = document.getElementById('eta');
+
+        if (avgRateMinPerSlide == null) {
+          avgRateEl.textContent = '—';
+          totalSlidesEl.textContent = String(totalSlides);
+          etaEl.textContent = 'Enter some entries to compute the rate.';
           return;
         }
 
-        // Example idea: predict time for *one more deck* once the group inputs its slide count
-        // You can adapt this to your exact logic, e.g., get remaining slides from URL param or input.
-        const remainingSlidesInputId = 'remainingSlides';
-        if (!document.getElementById(remainingSlidesInputId)) {
-          const wrap = document.createElement('div');
-          wrap.innerHTML = `
-            <label>Remaining slides to cover <input id="${remainingSlidesInputId}" type="number" min="0" value="30"></label>
-            <button id="calcBtn" type="button">Calculate ETA</button>
-            <div id="eta"></div>
-          `;
-          est.appendChild(wrap);
+        avgRateEl.textContent = `${avgRateMinPerSlide.toFixed(2)} min/slide`;
+        totalSlidesEl.textContent = String(totalSlides);
 
-          document.getElementById('calcBtn').addEventListener('click', () => {
-            const rem = Number(document.getElementById(remainingSlidesInputId).value || 0);
-            const minsLeft = rem * avgRateMinPerSlide;
-
-            // compute local time in America/New_York
-            const nowEST = nowInEST();
-            const eta = new Date(nowEST.getTime() + minsLeft*60000);
-            const etaStr = eta.toLocaleString('en-US', { timeZone: 'America/New_York' });
-
-            document.getElementById('eta').textContent =
-              `Avg rate ≈ ${avgRateMinPerSlide.toFixed(2)} min/slide. ` +
-              `Estimated time left: ${minsLeft.toFixed(1)} min. ETA (EST): ${etaStr}`;
-          });
+        const rem = Number(document.getElementById('remainingSlides').value || 0);
+        const minsLeft = rem * avgRateMinPerSlide;
+        if (rem > 0) {
+          const eta = new Date(nowInNY().getTime() + minsLeft * 60000);
+          const etaStr = eta.toLocaleString('en-US', { timeZone: 'America/New_York' });
+          etaEl.textContent = `Estimated time left ${minsLeft.toFixed(1)} min. ETA ${etaStr}`;
         } else {
-          // already rendered; nothing to do
+          etaEl.textContent = 'Set remaining slides to get ETA.';
         }
       }
 
       async function refresh() {
-        const rows = await fetchData();
-        renderTable(rows);
-        renderEstimate(rows);
+        try {
+          const rows = await fetchData();
+          renderTable(rows);
+          renderStats(rows);
+        } catch (e) {
+          console.error(e);
+          document.getElementById('eta').textContent = 'Could not load data.';
+        }
       }
+
+      document.getElementById('calcBtn').addEventListener('click', refresh);
 
       document.getElementById('entryForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const fd = new FormData(e.target);
         const payload = Object.fromEntries(fd.entries());
-        // send to Apps Script
+
         const status = document.getElementById('status');
         status.textContent = 'Saving…';
+
         try {
-          const res = await fetch(API, {
+          // no-cors avoids preflight issues to Apps Script
+          await fetch(API, {
             method: 'POST',
+            mode: 'no-cors',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
-          const json = await res.json();
-          if (json.ok) {
-            status.textContent = 'Saved!';
-            e.target.reset();
-            refresh();
-          } else {
-            status.textContent = 'Error saving.';
-          }
-        } catch {
+
+          status.textContent = 'Saved. Refreshing…';
+          e.target.reset();
+          setTimeout(refresh, 800);
+          setTimeout(() => status.textContent = '', 1500);
+        } catch (err) {
           status.textContent = 'Network error.';
+          status.classList.add('danger');
         }
       });
 
       refresh();
-      // optional: auto-refresh every minute
-      setInterval(refresh, 60000);
+      setInterval(refresh, 60_000);
     </script>
   </body>
 </html>
