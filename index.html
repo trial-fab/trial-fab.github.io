@@ -5,22 +5,29 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Class Length Tracker</title>
     <style>
-      :root { --gap: 12px; }
+      :root { --gap: 14px; }
       body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 840px; margin: 24px auto; padding: 0 12px; }
       h1 { margin: 0 0 8px; }
       .sub { color: #555; margin-bottom: 16px; }
       .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
-      form label { display: block; margin: 8px 0 4px; }
+
+      /* Vertical form layout */
+      form label { display: block; margin: 0 0 6px; font-weight: 600; }
+      .field { margin-bottom: var(--gap); }
       input, button, select { font: inherit; }
-      input[type="number"], input[type="time"] { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 8px; }
+      input[type="number"], input[type="time"] {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 10px;
+        box-sizing: border-box;
+      }
       button { padding: 10px 14px; border: 0; border-radius: 10px; cursor: pointer; }
-      .row { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--gap); }
-      .row-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); }
-      .row-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap); }
-      .actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+      .actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; flex-wrap: wrap; }
       #status { font-size: 0.95em; color: #444; }
+
       table { width: 100%; border-collapse: collapse; }
-      th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+      th, td { text-align: left; padding: 10px; border-bottom: 1px solid #eee; }
       th { background: #fafafa; }
       .muted { color: #777; }
       .inline { display: inline-flex; align-items: center; gap: 8px; }
@@ -29,9 +36,10 @@
       .hint { font-size: 0.9em; color: #666; }
       .danger { color: #b00020; }
       .success { color: #0a6; }
-      @media (max-width: 640px) {
-        .row, .row-3, .row-4 { grid-template-columns: 1fr; }
-      }
+
+      /* Compact two-column utility for the estimate header */
+      .row { display: grid; grid-template-columns: 1fr auto; gap: 12px; }
+      @media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
     </style>
   </head>
   <body>
@@ -40,19 +48,21 @@
 
     <div class="card">
       <form id="entryForm" autocomplete="off">
-        <div class="row-4">
-          <label>PowerPoint #
-            <input type="number" name="ppt_number" min="0" required>
-          </label>
-          <label>Slides
-            <input type="number" name="slides" min="0" required>
-          </label>
-          <label>Start time (HH:MM)
-            <input type="time" name="start_time" required>
-          </label>
-          <label>End time (HH:MM)
-            <input type="time" name="end_time" required>
-          </label>
+        <div class="field">
+          <label for="ppt_number">PowerPoint #</label>
+          <input id="ppt_number" type="number" name="ppt_number" min="0" required>
+        </div>
+        <div class="field">
+          <label for="slides">Slides</label>
+          <input id="slides" type="number" name="slides" min="0" required>
+        </div>
+        <div class="field">
+          <label for="start_time">Start time (HH:MM)</label>
+          <input id="start_time" type="time" name="start_time" required>
+        </div>
+        <div class="field">
+          <label for="end_time">End time (HH:MM)</label>
+          <input id="end_time" type="time" name="end_time" required>
         </div>
 
         <!-- Stored for context on the sheet -->
@@ -81,7 +91,7 @@
         </div>
         <div class="right">
           <div class="inline">
-            <label>Remaining slides
+            <label class="muted">Remaining slides
               <input id="remainingSlides" type="number" min="0" value="30" style="width:120px; margin-left:8px;">
             </label>
             <button id="calcBtn" type="button" title="Calculate ETA">Calculate</button>
@@ -99,31 +109,23 @@
 
     <script>
       // ===== CONFIGURE THIS =====
-      // Paste your Apps Script Web App URL (must end with /exec)
-      const API = 'https://script.google.com/macros/s/AKfycbytlax3H4dtBA5WAyOU5uK86DrewPP2MkJFmwDG5ekgAMiUEc_2q9kjo0MRQE8ub7EG/exec';
+      const API = 'https://script.google.com/macros/s/AKfycbytlax3H4dtBA5WAyOU5uK86DrewPP2MkJFmwDG5ekgAMiUEc_2q9kjo0MRQE8ub7EG/exec'; // must end with /exec
 
       // === Time helpers ===
-
-      // New York "now" object
       function nowInNY() {
         return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
       }
 
-      // Build a Date in New York for today at "HH:MM"
       function nyDateAt(timeHHMM) {
         const nyNow = nowInNY();
         const [hh, mm] = String(timeHHMM).split(':').map(Number);
-        // construct local components, then let toLocaleString in NY give us the correct epoch
         const y = nyNow.getFullYear();
         const m = nyNow.getMonth() + 1;
         const d = nyNow.getDate();
-
-        // Use a plain date-time string, then interpret in NY by re-parsing through NY locale
         const nyMillis = new Date(
           new Date(`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')} ${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00`)
             .toLocaleString('en-US', { timeZone: 'America/New_York' })
         ).getTime();
-
         return new Date(nyMillis);
       }
 
@@ -131,7 +133,7 @@
         const s = nyDateAt(startHHMM);
         const e = nyDateAt(endHHMM);
         let diff = (e - s) / 60000;
-        if (diff < 0) diff += 24 * 60; // pass midnight
+        if (diff < 0) diff += 24 * 60;
         return diff;
       }
 
@@ -145,8 +147,24 @@
       setNYDateHidden();
       setInterval(setNYDateHidden, 60_000);
 
-      // === Data IO ===
+      // Display-only: normalize anything to "HH:MM"
+      function formatHHMM(value) {
+        if (!value && value !== 0) return '';
+        // Already looks like "HH:MM"
+        if (typeof value === 'string' && /^\d{1,2}:\d{2}$/.test(value)) return value;
+        // Try parsing dates or numbers from Sheets
+        const d = new Date(value);
+        if (!isNaN(d)) {
+          const hh = String(d.getHours()).padStart(2,'0');
+          const mm = String(d.getMinutes()).padStart(2,'0');
+          return `${hh}:${mm}`;
+        }
+        // Try extracting HH:MM from a long string
+        const m = String(value).match(/(\d{1,2}:\d{2})/);
+        return m ? m[1] : String(value);
+      }
 
+      // === Data IO ===
       async function fetchData() {
         const res = await fetch(API);
         const json = await res.json().catch(() => ({}));
@@ -159,7 +177,8 @@
 
         rows.forEach(r => {
           const slides = Number(r.slides);
-          const st = r.start_time, et = r.end_time;
+          const st = formatHHMM(r.start_time);
+          const et = formatHHMM(r.end_time);
           if (!slides || !st || !et) return;
           const mins = minutesBetweenTimes(st, et);
           if (mins > 0 && slides > 0) {
@@ -183,16 +202,23 @@
           return;
         }
 
+        // Only these 4 columns, with time formatted as HH:MM
         const header = document.createElement('tr');
-        ['date_local','ppt_number','slides','start_time','end_time','timestamp'].forEach(h => {
+        ['ppt_number','slides','start_time','end_time'].forEach(h => {
           const th = document.createElement('th'); th.textContent = h; header.appendChild(th);
         });
         table.appendChild(header);
 
         rows.slice(-12).forEach(r => {
           const tr = document.createElement('tr');
-          ['date_local','ppt_number','slides','start_time','end_time','timestamp'].forEach(k => {
-            const td = document.createElement('td'); td.textContent = r[k] ?? ''; tr.appendChild(td);
+          const cells = {
+            ppt_number: r.ppt_number ?? '',
+            slides: r.slides ?? '',
+            start_time: formatHHMM(r.start_time),
+            end_time: formatHHMM(r.end_time)
+          };
+          ['ppt_number','slides','start_time','end_time'].forEach(k => {
+            const td = document.createElement('td'); td.textContent = cells[k]; tr.appendChild(td);
           });
           table.appendChild(tr);
         });
@@ -250,7 +276,6 @@
         status.textContent = 'Saving…';
 
         try {
-          // no-cors avoids preflight issues to Apps Script
           await fetch(API, {
             method: 'POST',
             mode: 'no-cors',
