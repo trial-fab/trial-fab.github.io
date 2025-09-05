@@ -1,90 +1,178 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-    <title>Class Length Predictor</title>
-</head>
-<body>
-    <h1>Class Length Predictor</h1>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Class Length Tracker</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 12px; }
+      form, .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
+      label { display: block; margin: 8px 0 4px; }
+      input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 8px; }
+      button { padding: 10px 14px; border: 0; border-radius: 10px; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <h1>Class Length Tracker</h1>
 
-    <div id="presentation-form">
-        <h2>Add Presentation Data</h2>
-        <label for="ppt_name">Presentation Name:</label><br>
-        <input type="text" id="ppt_name" name="ppt_name"><br>
-        <label for="slides">Number of Slides:</label><br>
-        <input type="number" id="slides" name="slides"><br>
-        <label for="start_time">Start Time (HH:MM):</label><br>
-        <input type="text" id="start_time" name="start_time"><br>
-        <label for="end_time">End Time (HH:MM):</label><br>
-        <input type="text" id="end_time" name="end_time"><br><br>
-        <button onclick="addPresentation()">Add Presentation</button>
+    <form id="entryForm">
+      <label>PowerPoint # <input type="number" name="ppt_number" required></label>
+      <label>Slides <input type="number" name="slides" required></label>
+      <label>Start time (EST) <input type="datetime-local" name="start_time" required></label>
+      <label>End time (EST) <input type="datetime-local" name="end_time" required></label>
+      <button type="submit">Add</button>
+      <span id="status"></span>
+    </form>
+
+    <div class="card">
+      <h2>Live Estimate</h2>
+      <div id="estimate">Loading…</div>
     </div>
 
-    <div id="results">
-        <h2>Results</h2>
-        <div id="individual-rates"></div>
-        <p id="average-rate"></p>
-        <p id="remaining-slides"></p>
-        <p id="predicted-time"></p>
-        <p id="estimated-end-time"></p>
+    <div class="card">
+      <h2>Recent Entries</h2>
+      <table id="table" border="0" cellpadding="6"></table>
     </div>
 
     <script>
-        let presentationData = {};
+      // ===== configure this =====
+      const API = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
 
-        function addPresentation() {
-            const name = document.getElementById('ppt_name').value;
-            const slides = parseInt(document.getElementById('slides').value);
-            const start_time = document.getElementById('start_time').value;
-            const end_time = document.getElementById('end_time').value;
+      // current time in EST
+      function nowInEST() {
+        // America/New_York handles EST/EDT automatically
+        return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      }
 
-            if (name && !isNaN(slides) && start_time && end_time) {
-                presentationData[name] = {
-                    slides: slides,
-                    start_time: start_time,
-                    end_time: end_time
-                };
-                document.getElementById('ppt_name').value = '';
-                document.getElementById('slides').value = '';
-                document.getElementById('start_time').value = '';
-                document.getElementById('end_time').value = '';
-                calculateResults();
-            } else {
-                alert('Please fill in all fields.');
-            }
+      // minutes between two local datetime strings
+      function minutesBetween(startLocal, endLocal) {
+        const s = new Date(startLocal);
+        const e = new Date(endLocal);
+        return (e - s) / 60000;
+      }
+
+      async function fetchData() {
+        const res = await fetch(API);
+        const json = await res.json();
+        return json.data || [];
+      }
+
+      function computeStats(rows) {
+        // rows: [{ppt_number, slides, start_time, end_time}, ...]
+        // compute per-slide rate (minutes per slide) using entries with valid times & slides > 0
+        const rates = [];
+        let totalSlides = 0;
+
+        rows.forEach(r => {
+          const slides = Number(r.slides);
+          if (!slides || !r.start_time || !r.end_time) return;
+          const mins = minutesBetween(r.start_time, r.end_time);
+          if (mins > 0 && slides > 0) {
+            rates.push(mins / slides);
+            totalSlides += slides;
+          }
+        });
+
+        const avgRateMinPerSlide = rates.length
+          ? rates.reduce((a,b)=>a+b,0) / rates.length
+          : null;
+
+        return { avgRateMinPerSlide, totalSlides };
+      }
+
+      function renderTable(rows) {
+        const table = document.getElementById('table');
+        table.innerHTML = '';
+        if (!rows.length) { table.innerHTML = '<i>No data yet</i>'; return; }
+
+        const header = document.createElement('tr');
+        ['ppt_number','slides','start_time','end_time'].forEach(h => {
+          const th = document.createElement('th'); th.textContent = h; header.appendChild(th);
+        });
+        table.appendChild(header);
+
+        rows.slice(-10).forEach(r => {
+          const tr = document.createElement('tr');
+          ['ppt_number','slides','start_time','end_time'].forEach(k => {
+            const td = document.createElement('td'); td.textContent = r[k] ?? ''; tr.appendChild(td);
+          });
+          table.appendChild(tr);
+        });
+      }
+
+      function renderEstimate(rows) {
+        const est = document.getElementById('estimate');
+        const { avgRateMinPerSlide, totalSlides } = computeStats(rows);
+        if (!avgRateMinPerSlide) {
+          est.innerHTML = 'Insufficient data to estimate yet.';
+          return;
         }
 
-        function calculateResults() {
-            fetch('/calculate', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ presentation_data: presentationData })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    alert(data.error);
-                    return;
-                }
-                displayResults(data);
-            })
-            .catch(error => {
-                console.error('Error:', error);
-            });
-        }
+        // Example idea: predict time for *one more deck* once the group inputs its slide count
+        // You can adapt this to your exact logic, e.g., get remaining slides from URL param or input.
+        const remainingSlidesInputId = 'remainingSlides';
+        if (!document.getElementById(remainingSlidesInputId)) {
+          const wrap = document.createElement('div');
+          wrap.innerHTML = `
+            <label>Remaining slides to cover <input id="${remainingSlidesInputId}" type="number" min="0" value="30"></label>
+            <button id="calcBtn" type="button">Calculate ETA</button>
+            <div id="eta"></div>
+          `;
+          est.appendChild(wrap);
 
-        function displayResults(data) {
-            const individualRatesDiv = document.getElementById('individual-rates');
-            individualRatesDiv.innerHTML = '<h3>Individual Rates:</h3>';
-            for (const name in data.individual_rates) {
-                individualRatesDiv.innerHTML += `<p>${name}: ${data.individual_rates[name]}</p>`;
-            }
-            document.getElementById('average-rate').innerText = `Average rate: ${data.average_rate}`;
-            document.getElementById('remaining-slides').innerText = `Remaining slides: ${data.remaining_slides}`;
-            document.getElementById('predicted-time').innerText = `Predicted time for remaining slides: ${data.predicted_time}`;
-            document.getElementById('estimated-end-time').innerText = `Estimated end time (EST): ${data.estimated_end_time}`;
+          document.getElementById('calcBtn').addEventListener('click', () => {
+            const rem = Number(document.getElementById(remainingSlidesInputId).value || 0);
+            const minsLeft = rem * avgRateMinPerSlide;
+
+            // compute local time in America/New_York
+            const nowEST = nowInEST();
+            const eta = new Date(nowEST.getTime() + minsLeft*60000);
+            const etaStr = eta.toLocaleString('en-US', { timeZone: 'America/New_York' });
+
+            document.getElementById('eta').textContent =
+              `Avg rate ≈ ${avgRateMinPerSlide.toFixed(2)} min/slide. ` +
+              `Estimated time left: ${minsLeft.toFixed(1)} min. ETA (EST): ${etaStr}`;
+          });
+        } else {
+          // already rendered; nothing to do
         }
+      }
+
+      async function refresh() {
+        const rows = await fetchData();
+        renderTable(rows);
+        renderEstimate(rows);
+      }
+
+      document.getElementById('entryForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const payload = Object.fromEntries(fd.entries());
+        // send to Apps Script
+        const status = document.getElementById('status');
+        status.textContent = 'Saving…';
+        try {
+          const res = await fetch(API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const json = await res.json();
+          if (json.ok) {
+            status.textContent = 'Saved!';
+            e.target.reset();
+            refresh();
+          } else {
+            status.textContent = 'Error saving.';
+          }
+        } catch {
+          status.textContent = 'Network error.';
+        }
+      });
+
+      refresh();
+      // optional: auto-refresh every minute
+      setInterval(refresh, 60000);
     </script>
-</body>
+  </body>
 </html>
