@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Class Length Predictor</title>
+</head>
+<body>
+    <h1>Class Length Predictor</h1>
+
+    <div id="presentation-form">
+        <h2>Add Presentation Data</h2>
+        <label for="ppt_name">Presentation Name:</label><br>
+        <input type="text" id="ppt_name" name="ppt_name"><br>
+        <label for="slides">Number of Slides:</label><br>
+        <input type="number" id="slides" name="slides"><br>
+        <label for="start_time">Start Time (HH:MM):</label><br>
+        <input type="text" id="start_time" name="start_time"><br>
+        <label for="end_time">End Time (HH:MM):</label><br>
+        <input type="text" id="end_time" name="end_time"><br><br>
+        <button onclick="addPresentation()">Add Presentation</button>
+    </div>
+
+    <div id="results">
+        <h2>Results</h2>
+        <div id="individual-rates"></div>
+        <p id="average-rate"></p>
+        <p id="remaining-slides"></p>
+        <p id="predicted-time"></p>
+        <p id="estimated-end-time"></p>
+    </div>
+
+    <script>
+        let presentationData = {};
+
+        function addPresentation() {
+            const name = document.getElementById('ppt_name').value;
+            const slides = parseInt(document.getElementById('slides').value);
+            const start_time = document.getElementById('start_time').value;
+            const end_time = document.getElementById('end_time').value;
+
+            if (name && !isNaN(slides) && start_time && end_time) {
+                presentationData[name] = {
+                    slides: slides,
+                    start_time: start_time,
+                    end_time: end_time
+                };
+                document.getElementById('ppt_name').value = '';
+                document.getElementById('slides').value = '';
+                document.getElementById('start_time').value = '';
+                document.getElementById('end_time').value = '';
+                calculateResults();
+            } else {
+                alert('Please fill in all fields.');
+            }
+        }
+
+        function calculateResults() {
+            fetch('/calculate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ presentation_data: presentationData })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+                displayResults(data);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+        }
+
+        function displayResults(data) {
+            const individualRatesDiv = document.getElementById('individual-rates');
+            individualRatesDiv.innerHTML = '<h3>Individual Rates:</h3>';
+            for (const name in data.individual_rates) {
+                individualRatesDiv.innerHTML += `<p>${name}: ${data.individual_rates[name]}</p>`;
+            }
+            document.getElementById('average-rate').innerText = `Average rate: ${data.average_rate}`;
+            document.getElementById('remaining-slides').innerText = `Remaining slides: ${data.remaining_slides}`;
+            document.getElementById('predicted-time').innerText = `Predicted time for remaining slides: ${data.predicted_time}`;
+            document.getElementById('estimated-end-time').innerText = `Estimated end time (EST): ${data.estimated_end_time}`;
+        }
+    </script>
+</body>
+</html>
